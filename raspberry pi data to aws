@@ -1,0 +1,56 @@
+// python code//
+import os, boto3, logging
+from botocore.exceptions import ClientError
+
+
+def create_bucket(bucket_name, region=None):
+    try:
+        if region is None:
+            s3_client = boto3.client('s3')            
+            s3_client.create_bucket(Bucket=bucket_name)
+        else:
+            s3_client = boto3.client('s3', region_name=region)
+            location = {'LocationConstraint': region}
+            s3_client.create_bucket(Bucket=bucket_name,
+                                    CreateBucketConfiguration=location)
+    except ClientError as e:
+        logging.error(e)
+        return False
+    return True
+
+# 버킷 생성
+create_bucket('picamera-make-images')
+
+from time import sleep
+from picamera import PiCamera
+camera = PiCamera (resolution=(1280, 720), framerate=30)
+camera.iso = 100
+sleep(2)
+camera.shutter_speed = camera.exposure_speed
+camera.exposure_mode = 'off'
+g = camera.awb_gains
+camera.awb_mode = 'off'
+camera.awb_gains = g
+#고정된 설정으로 여러 사진 찍기
+camera.capture_sequence(['image%02d.jpg' % i for i in range(10)])
+# 파이카메라에서 찍은 사진 폴더에 임포트
+path_dir = '/home/pi/workspace/tx'
+file_list = os.listdir(path_dir)
+
+def upload_file(file_name, bucket, object_name=None):
+    # If S3 object_name was not specified, use file_name
+    if object_name is None:
+        object_name = file_name
+
+    # Upload the file
+    s3_client = boto3.client('s3')
+    try:
+        response = s3_client.upload_file(file_name, bucket, object_name)
+    except ClientError as e:
+        logging.error(e)
+        return False
+    return True
+
+for i in file_list:
+    upload_file(i, 'picamera-make-images')
+
