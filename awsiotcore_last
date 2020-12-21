@@ -1,0 +1,145 @@
+
+from awscrt import io, mqtt, auth, http
+from awsiot import mqtt_connection_builder
+import time as t
+import json
+import serial
+import RPi.GPIO as GPIO
+from time import sleep
+from luma.led_matrix.device import neopixel
+from luma.core.interface.serial import spi, noop
+from luma.core.render import canvas
+from luma.core.virtual import viewport
+from luma.led_matrix.device import max7219
+from luma.core.legacy import text, show_message
+from luma.core.legacy.font import proportional, CP437_FONT, LCD_FONT
+
+
+# Define ENDPOINT, CLIENT_ID, PATH_TO_CERT, PATH_TO_KEY, PATH_TO_ROOT, MESSAGE, TOPIC, and RANGE
+ENDPOINT = "a1jpskevl8sr71-ats.iot.us-east-1.amazonaws.com"
+CLIENT_ID = "testDevice"
+PATH_TO_CERT = "certificates/certificate.pem.crt"
+PATH_TO_KEY = "certificates/private.pem.key"
+PATH_TO_ROOT = "certificates/root.pem"
+# MESSAGE = "Hello World"
+TOPIC = "test/topic"
+TOPIC2 = "test/test"
+TOPIC3 ="test/pic"
+
+RANGE = 20
+GPIO.setmode(GPIO.BCM)
+BUZ =12
+ON = 1
+OFF = 0
+
+GPIO.setup(BUZ,GPIO.OUT)
+ck_pwm=GPIO.PWM(BUZ,800)
+
+# Spin up resources
+event_loop_group = io.EventLoopGroup(1)
+host_resolver = io.DefaultHostResolver(event_loop_group)
+client_bootstrap = io.ClientBootstrap(event_loop_group, host_resolver)
+mqtt_connection = mqtt_connection_builder.mtls_from_path(
+            endpoint=ENDPOINT,
+            cert_filepath=PATH_TO_CERT,
+            pri_key_filepath=PATH_TO_KEY,
+            client_bootstrap=client_bootstrap,
+            ca_filepath=PATH_TO_ROOT,
+            client_id=CLIENT_ID,
+            clean_session=False,
+            keep_alive_secs=6
+            )
+  
+def on_message_received(topic, payload, **kwargs):
+    print("Received message from topic '{}': {}".format(topic, payload))
+    if topic == "test/test":
+            
+        
+        ck_pwm.start(50)
+        t.sleep(5)
+        ck_pwm.stop()
+
+        GPIO.cleanup()
+
+    if topic == "test/pic":
+        serial = spi(port=0, device=0, gpio=noop())
+        device = max7219(serial, width=32, height=8, block_orientation=-90)
+        device.contrast(5)
+        virtual = viewport(device, width=32, height=16)
+
+        
+        for z in range(3):
+          with canvas(virtual) as draw:
+                for i in range(8):
+                        for k in range(8):
+                                text(draw, (i, k), "DDDD", fill="white", font=proportional(CP437_FONT))
+                sleep(0.2)
+
+          with canvas(virtual) as draw:
+                for i in range(8):
+                        for k in range(8):
+                                text(draw, (i, k), "DDDD", fill="black", font=proportional(CP437_FONT))
+
+        
+     
+
+
+        
+print("Connecting to {} with client ID '{}'...".format(
+        ENDPOINT, CLIENT_ID))
+# Make the connect() call
+connect_future = mqtt_connection.connect()
+# Future.result() waits until a result is available
+connect_future.result()
+print("Connected!")
+
+# Publish message to server desired number of times.
+print('Begin Publish')
+
+
+# for i in range(RANGE):
+while True:
+    ser = serial.Serial('/dev/ttyACM1', 9600, timeout=1)
+    ser.flush()
+
+    sleep(2)
+    if ser.in_waiting > 0:
+
+
+
+      line = ser.readline().decode('utf-8').rstrip()
+
+      if line == "":
+         line = 0
+      data = "{}".format(line)
+      # line = {"shock" : data}
+      print("data",data)
+      dataSplit = data.split(',')
+      print("dataSplit",dataSplit)
+
+      if len(dataSplit) ==3:
+              line = {"shock": dataSplit[0],"lat":dataSplit[1],"log":dataSplit[2]}   
+      else:
+              line = {"shock": dataSplit[0]} 
+
+      mqtt_connection.publish(topic=TOPIC2, payload=json.dumps(line), qos=mqtt.QoS.AT_LEAST_ONCE)
+      # mqtt_connection.subscribe(topic=TOPIC2, qos=mqtt.QoS.AT_LEAST_ONCE)
+      print("Published: '" + json.dumps(line) + "' to the topic: " + "'test/testing'")
+      subscribe_future, packet_id = mqtt_connection.subscribe(
+              topic=TOPIC3,
+              qos=mqtt.QoS.AT_LEAST_ONCE,
+              callback=on_message_received)
+      t.sleep(0.1)
+print('Publish End')
+
+
+
+# Subscribe
+print("Subscribing to topic '{}'...".format(TOPIC))
+
+
+subscribe_result = subscribe_future.result()
+print("Subscribed with {}".format(str(subscribe_result['qos'])))
+
+disconnect_future = mqtt_connection.disconnect()
+disconnect_future.result()
